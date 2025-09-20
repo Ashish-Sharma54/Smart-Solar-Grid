@@ -1,0 +1,454 @@
+import React, { useState, useEffect } from 'react';
+import { LineChart, Line, XAxis, YAxis, CartesianGrid, Tooltip, Legend, ResponsiveContainer, BarChart, Bar, AreaChart, Area } from 'recharts';
+import { createPortal } from 'react-dom';
+
+// Placeholder for a real API key.
+const OPEN_WEATHER_API_KEY = 'YOUR_OPEN_WEATHER_API_KEY';
+const CITY_NAME = 'New Delhi';
+const TOTAL_PANELS = 10;
+
+// A mock data generator for continuous, real-time sensor data
+const generatePanelData = (count = TOTAL_PANELS) => {
+  const data = [];
+  for (let i = 1; i <= count; i++) {
+    const voltage = (Math.random() * (48 - 45) + 45).toFixed(2);
+    const current = (Math.random() * (12 - 10) + 10).toFixed(2);
+    const temp = (Math.random() * (50 - 30) + 30).toFixed(2);
+    const irradiance = (Math.random() * (1000 - 600) + 600).toFixed(2);
+    const power = (voltage * current).toFixed(2);
+
+    let status = 'OK';
+    if (temp > 45) status = 'Overheated';
+    if (voltage < 46 || current < 10.5) status = 'Faulty';
+    if (irradiance < 700) status = 'Dusty';
+
+    data.push({
+      id: i,
+      voltage: parseFloat(voltage),
+      current: parseFloat(current),
+      temperature: parseFloat(temp),
+      irradiance: parseFloat(irradiance),
+      power: parseFloat(power),
+      status,
+    });
+  }
+  return data;
+};
+
+// Simulate a simple AI/ML prediction model
+const generatePredictedData = (hours = 24) => {
+  const data = [];
+  const now = new Date();
+  for (let i = 0; i < hours; i++) {
+    const futureTime = new Date(now.getTime() + i * 60 * 60 * 1000);
+    const timeLabel = `${futureTime.getHours()}:00`;
+    const predictedPower = (Math.sin((i / 24) * 2 * Math.PI) + 1) * (1500 * (1 + Math.random() * 0.1 - 0.05));
+    data.push({
+      time: timeLabel,
+      'Predicted Power': Math.max(0, predictedPower).toFixed(2),
+    });
+  }
+  return data;
+};
+
+const App = () => {
+  const [isDark, setIsDark] = useState(true);
+  const [page, setPage] = useState('home');
+  const [view, setView] = useState('overall');
+  const [selectedPanelId, setSelectedPanelId] = useState(null);
+  const [panels, setPanels] = useState([]);
+  const [weatherData, setWeatherData] = useState({ temperature: 'N/A', irradiance: 'N/A' });
+  const [chartData, setChartData] = useState([]);
+  const [alerts, setAlerts] = useState([]);
+  const [panelDataHistory, setPanelDataHistory] = useState({});
+  const [predictedData, setPredictedData] = useState([]);
+  const [gridData, setGridData] = useState([]);
+  const [isLoggedIn, setIsLoggedIn] = useState(false);
+  const [isModalOpen, setIsModalOpen] = useState(false);
+
+  // Function to simulate data ingestion to a "database"
+  const logToDatabase = (data) => {
+    // In a real application, this would be a POST request to a backend API
+    // e.g., fetch('/api/log', { method: 'POST', body: JSON.stringify(data) })
+    console.log('Simulating data ingestion:', data);
+  };
+
+  const exportToCSV = (filename) => {
+    const headers = ['Panel ID', 'Voltage (V)', 'Current (A)', 'Temperature (°C)', 'Irradiance (W/m²)', 'Instant Power (W)'];
+    const rows = panels.map(p => [p.id, p.voltage, p.current, p.temperature, p.irradiance, p.power]);
+    let csvContent = "data:text/csv;charset=utf-8," + headers.join(',') + '\n' + rows.map(e => e.join(',')).join('\n');
+    const encodedUri = encodeURI(csvContent);
+    const link = document.createElement("a");
+    link.setAttribute("href", encodedUri);
+    link.setAttribute("download", filename);
+    document.body.appendChild(link);
+    link.click();
+    document.body.removeChild(link);
+  };
+
+  useEffect(() => {
+    const initialPanels = generatePanelData();
+    setPanels(initialPanels);
+    const initialHistory = {};
+    initialPanels.forEach(panel => {
+      initialHistory[panel.id] = [{
+        time: new Date().toLocaleTimeString(),
+        voltage: panel.voltage,
+        current: panel.current,
+        temperature: panel.temperature,
+        irradiance: panel.irradiance,
+        power: panel.power,
+      }];
+    });
+    setPanelDataHistory(initialHistory);
+    setPredictedData(generatePredictedData());
+
+    const fetchWeatherAndSimulateData = () => {
+      setWeatherData({
+        temperature: `${(Math.random() * (35 - 20) + 20).toFixed(1)}°C`,
+        irradiance: `${(Math.random() * (1000 - 600) + 600).toFixed(0)} W/m²`,
+      });
+
+      const newPanels = generatePanelData();
+      setPanels(newPanels);
+
+      logToDatabase(newPanels);
+
+      setPanelDataHistory(prevHistory => {
+        const newHistory = { ...prevHistory };
+        const newAlerts = [];
+        const currentTime = new Date().toLocaleTimeString();
+        const currentPowerSum = newPanels.reduce((sum, p) => sum + p.power, 0);
+        const currentDemand = (Math.random() * (currentPowerSum * 1.5 - currentPowerSum * 0.7) + currentPowerSum * 0.7).toFixed(2);
+
+        newPanels.forEach(panel => {
+          if (!newHistory[panel.id]) {
+            newHistory[panel.id] = [];
+          }
+          newHistory[panel.id] = [...newHistory[panel.id], {
+            time: currentTime,
+            voltage: panel.voltage,
+            current: panel.current,
+            temperature: panel.temperature,
+            irradiance: panel.irradiance,
+            power: panel.power,
+          }].slice(-20);
+
+          if (panel.status !== 'OK') {
+            newAlerts.push({
+              id: `${panel.id}-${currentTime}`,
+              message: `Panel ${panel.id} is ${panel.status.toLowerCase()}!`,
+              status: panel.status,
+            });
+          }
+        });
+        setAlerts(newAlerts);
+        setGridData(prevGridData => {
+          const newGridData = [...prevGridData, { time: currentTime, Supply: currentPowerSum, Demand: parseFloat(currentDemand) }].slice(-20);
+          return newGridData;
+        });
+        return newHistory;
+      });
+
+      const dailyData = Array.from({ length: 7 }, (_, i) => {
+        const date = new Date();
+        date.setDate(date.getDate() - (6 - i));
+        const formattedDate = date.toLocaleDateString('en-US', { day: 'numeric', month: 'short' });
+        const expected = Math.floor(Math.random() * (40 - 30 + 1)) + 30;
+        const actual = Math.floor(Math.random() * (expected - 25 + 1)) + 25;
+        return { name: formattedDate, 'Expected Power': expected, 'Actual Power': actual };
+      });
+      setChartData(dailyData);
+    };
+
+    fetchWeatherAndSimulateData();
+    const interval = setInterval(fetchWeatherAndSimulateData, 5000);
+    return () => clearInterval(interval);
+  }, []);
+
+  const totalInstalledPanels = panels.length;
+  const totalPowerGenerated = panels.reduce((sum, panel) => sum + panel.power, 0).toFixed(2);
+  const totalExpectedPower = panels.reduce((sum, panel) => sum + (panel.voltage * panel.current), 0).toFixed(2);
+  const efficiency = ((totalPowerGenerated / totalExpectedPower) * 100).toFixed(2);
+  const gridBalance = gridData.length > 0 ? (gridData[gridData.length - 1].Supply - gridData[gridData.length - 1].Demand).toFixed(2) : 0;
+  const gridStatus = gridBalance > 0 ? 'Surplus' : (gridBalance < 0 ? 'Shortage' : 'Balanced');
+
+  const commonClasses = {
+    bg: `min-h-screen transition-colors duration-300 ${isDark ? 'bg-gray-950 text-gray-100' : 'bg-gray-50 text-gray-900'}`,
+    card: `p-6 rounded-2xl shadow-xl transition-all duration-300 ${isDark ? 'bg-gray-900' : 'bg-white'}`,
+    button: `px-6 py-3 rounded-xl font-semibold transition-all duration-200 text-white shadow-md`,
+    ctaButton: `bg-green-600 hover:bg-green-700`,
+    dashboardButton: `bg-blue-600 hover:bg-blue-700`,
+    viewButton: `px-4 py-2 rounded-xl text-sm font-semibold transition-colors duration-200`,
+    icon: `w-6 h-6`,
+  };
+
+  const getStatusColor = (status) => {
+    switch (status) {
+      case 'OK': return 'border-green-500 bg-green-500/10 text-green-500';
+      case 'Dusty': return 'border-yellow-500 bg-yellow-500/10 text-yellow-500';
+      case 'Faulty': return 'border-red-500 bg-red-500/10 text-red-500';
+      case 'Overheated': return 'border-purple-500 bg-purple-500/10 text-purple-500';
+      default: return 'border-gray-500 bg-gray-500/10 text-gray-500';
+    }
+  };
+
+  const DashboardHeader = () => (
+    <header className="flex flex-col md:flex-row justify-between items-center mb-8">
+      <h2 className="text-3xl md:text-4xl font-bold mb-4 md:mb-0">
+        {selectedPanelId ? `Panel #${selectedPanelId} Details` : 'Solar Grid Management Dashboard'}
+      </h2>
+      <div className="flex items-center space-x-4 mt-4 md:mt-0">
+        <button
+          onClick={() => setView('overall')}
+          className={`${commonClasses.viewButton} ${view === 'overall' ? 'bg-blue-600 text-white' : (isDark ? 'text-gray-400 hover:bg-gray-800' : 'text-gray-700 hover:bg-gray-100')}`}
+        >
+          Overall Dashboard
+        </button>
+        <button
+          onClick={() => { setView('panels'); setSelectedPanelId(null); }}
+          className={`${commonClasses.viewButton} ${view === 'panels' ? 'bg-blue-600 text-white' : (isDark ? 'text-gray-400 hover:bg-gray-800' : 'text-gray-700 hover:bg-gray-100')}`}
+        >
+          Panel-Wise Monitoring
+        </button>
+        <button
+          onClick={() => exportToCSV('solar_data.csv')}
+          className={`${commonClasses.viewButton} ${isDark ? 'text-gray-400 hover:bg-gray-800' : 'text-gray-700 hover:bg-gray-100'}`}
+        >
+          Export Data
+        </button>
+        <label className="relative inline-flex items-center cursor-pointer">
+          <input type="checkbox" className="sr-only peer" checked={isDark} onChange={() => setIsDark(!isDark)} />
+          <div className={`w-11 h-6 ${isDark ? 'bg-gray-600' : 'bg-gray-200'} rounded-full peer-focus:outline-none peer-focus:ring-2 peer-focus:ring-blue-300 peer-checked:after:translate-x-full peer-checked:after:border-white after:content-[''] after:absolute after:top-[2px] after:left-[2px] after:bg-white after:border-gray-300 after:border after:rounded-full after:h-5 after:w-5 after:transition-all peer-checked:bg-blue-600`}></div>
+        </label>
+      </div>
+    </header>
+  );
+
+  const OverallDashboard = () => (
+    <>
+      <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-6 mb-8">
+        <div className={`${commonClasses.card} flex items-center`}>
+          <div className={`p-3 rounded-full ${isDark ? 'bg-blue-500' : 'bg-blue-200'}`}>
+            <svg className={`${commonClasses.icon} ${isDark ? 'text-white' : 'text-blue-600'}`} fill="currentColor" viewBox="0 0 20 20" xmlns="http://www.w3.org/2000/svg">
+              <path d="M10 2a8 8 0 100 16 8 8 0 000-16zM5 10a1 1 0 011-1h8a1 1 0 110 2H6a1 1 0 01-1-1z" clipRule="evenodd" fillRule="evenodd"></path>
+            </svg>
+          </div>
+          <div className="ml-4">
+            <p className="text-sm font-medium">Total Panels</p>
+            <p className="text-xl font-bold">{totalInstalledPanels}</p>
+          </div>
+        </div>
+        <div className={`${commonClasses.card} flex items-center`}>
+          <div className={`p-3 rounded-full ${isDark ? 'bg-yellow-500' : 'bg-yellow-200'}`}>
+            <svg className={`${commonClasses.icon} ${isDark ? 'text-white' : 'text-yellow-600'}`} fill="currentColor" viewBox="0 0 20 20" xmlns="http://www.w3.org/2000/svg">
+              <path d="M10 2a8 8 0 100 16 8 8 0 000-16zM5 10a1 1 0 011-1h8a1 1 0 110 2H6a1 1 0 01-1-1z" clipRule="evenodd" fillRule="evenodd"></path>
+            </svg>
+          </div>
+          <div className="ml-4">
+            <p className="text-sm font-medium">Total Power</p>
+            <p className="text-xl font-bold">{totalPowerGenerated} W</p>
+          </div>
+        </div>
+        <div className={`${commonClasses.card} flex items-center`}>
+          <div className={`p-3 rounded-full ${isDark ? 'bg-green-500' : 'bg-green-200'}`}>
+            <svg className={`${commonClasses.icon} ${isDark ? 'text-white' : 'text-green-600'}`} fill="currentColor" viewBox="0 0 20 20" xmlns="http://www.w3.org/2000/svg">
+              <path d="M10 2a8 8 0 100 16 8 8 0 000-16zM5 10a1 1 0 011-1h8a1 1 0 110 2H6a1 1 0 01-1-1z" clipRule="evenodd" fillRule="evenodd"></path>
+            </svg>
+          </div>
+          <div className="ml-4">
+            <p className="text-sm font-medium">Efficiency</p>
+            <p className="text-xl font-bold">{efficiency}%</p>
+          </div>
+        </div>
+        <div className={`${commonClasses.card} flex items-center`}>
+          <div className={`p-3 rounded-full ${isDark ? 'bg-indigo-500' : 'bg-indigo-200'}`}>
+            <svg className={`${commonClasses.icon} ${isDark ? 'text-white' : 'text-indigo-600'}`} fill="currentColor" viewBox="0 0 20 20" xmlns="http://www.w3.org/2000/svg">
+              <path d="M10 2a8 8 0 100 16 8 8 0 000-16zM5 10a1 1 0 011-1h8a1 1 0 110 2H6a1 1 0 01-1-1z" clipRule="evenodd" fillRule="evenodd"></path>
+            </svg>
+          </div>
+          <div className="ml-4">
+            <p className="text-sm font-medium">Grid Balance</p>
+            <p className="text-xl font-bold">{gridBalance} W</p>
+            <p className={`text-sm font-medium ${gridBalance < 0 ? 'text-red-500' : 'text-green-500'}`}>{gridStatus}</p>
+          </div>
+        </div>
+      </div>
+      <div className="grid grid-cols-1 lg:grid-cols-3 gap-6 mb-8">
+        <div className={`lg:col-span-2 ${commonClasses.card} overflow-hidden h-96`}>
+          <h3 className="text-xl font-semibold mb-4">Daily Power Generation</h3>
+          <ResponsiveContainer width="100%" height="100%">
+            <BarChart data={chartData}>
+              <CartesianGrid strokeDasharray="3 3" strokeOpacity={0.5} />
+              <XAxis dataKey="name" />
+              <YAxis />
+              <Tooltip />
+              <Legend />
+              <Bar dataKey="Expected Power" fill="#8884d8" name="Expected (kWh)" />
+              <Bar dataKey="Actual Power" fill="#82ca9d" name="Actual (kWh)" />
+            </BarChart>
+          </ResponsiveContainer>
+        </div>
+        <div className={`lg:col-span-1 ${commonClasses.card} overflow-hidden`}>
+          <h3 className="text-xl font-semibold mb-4">Active Alerts</h3>
+          <div className="space-y-4 max-h-80 overflow-y-auto pr-2">
+            {alerts.length > 0 ? (
+              alerts.map((alert) => (
+                <div key={alert.id} className="flex items-start bg-red-100 dark:bg-red-900 text-red-700 dark:text-red-300 p-3 rounded-lg shadow-sm">
+                  <svg className="w-5 h-5 mt-1 mr-3 flex-shrink-0" fill="currentColor" viewBox="0 0 20 20" xmlns="http://www.w3.org/2000/svg">
+                    <path fillRule="evenodd" d="M18 10a8 8 0 11-16 0 8 8 0 0116 0zm-7-4a1 1 0 11-2 0 1 1 0 012 0zM9 9a1 1 0 000 2v3a1 1 0 001 1h1a1 1 0 100-2v-3a1 1 0 00-1-1H9z" clipRule="evenodd"></path>
+                  </svg>
+                  <span className="text-sm font-medium">{alert.message}</span>
+                </div>
+              ))
+            ) : (
+              <p className="text-gray-500">No active alerts. All systems are running smoothly.</p>
+            )}
+          </div>
+        </div>
+      </div>
+      <div className="grid grid-cols-1 lg:grid-cols-2 gap-6 mb-8">
+        <div className={`${commonClasses.card} overflow-hidden h-96`}>
+          <h3 className="text-xl font-semibold mb-4">Generation vs. Grid Demand (W)</h3>
+          <ResponsiveContainer width="100%" height="100%">
+            <AreaChart data={gridData}>
+              <CartesianGrid strokeDasharray="3 3" />
+              <XAxis dataKey="time" />
+              <YAxis />
+              <Tooltip />
+              <Legend />
+              <Area type="monotone" dataKey="Supply" stroke="#10B981" fillOpacity={0.5} fill="#10B981" />
+              <Area type="monotone" dataKey="Demand" stroke="#EF4444" fillOpacity={0.5} fill="#EF4444" />
+            </AreaChart>
+          </ResponsiveContainer>
+        </div>
+        <div className={`${commonClasses.card} overflow-hidden h-96`}>
+          <h3 className="text-xl font-semibold mb-4">24-Hour Power Prediction (W)</h3>
+          <ResponsiveContainer width="100%" height="100%">
+            <LineChart data={predictedData}>
+              <CartesianGrid strokeDasharray="3 3" />
+              <XAxis dataKey="time" />
+              <YAxis />
+              <Tooltip />
+              <Legend />
+              <Line type="monotone" dataKey="Predicted Power" stroke="#6366F1" dot={false} />
+            </LineChart>
+          </ResponsiveContainer>
+        </div>
+      </div>
+    </>
+  );
+
+  const PanelsView = () => (
+    <>
+      <h3 className="text-xl font-semibold mb-4">Installed Panels ({totalInstalledPanels})</h3>
+      <div className="grid grid-cols-1 sm:grid-cols-2 md:grid-cols-3 lg:grid-cols-5 gap-6 mb-8">
+        {panels.map(panel => (
+          <div
+            key={panel.id}
+            onClick={() => { setSelectedPanelId(panel.id); setView('panel-detail'); }}
+            className={`${commonClasses.card} cursor-pointer hover:scale-105 transform transition-transform duration-200 border-2 ${getStatusColor(panel.status)}`}
+          >
+            <p className="text-2xl font-bold">Panel #{panel.id}</p>
+            <p className="text-sm font-medium">{panel.status}</p>
+            <p className="mt-2 text-sm text-gray-500">Power: {panel.power} W</p>
+            <p className="text-sm text-gray-500">Temp: {panel.temperature}°C</p>
+          </div>
+        ))}
+      </div>
+    </>
+  );
+
+  const PanelDetailView = () => {
+    const data = panelDataHistory[selectedPanelId] || [];
+    const latestData = data[data.length - 1] || {};
+
+    const ChartCard = ({ title, dataKey, color }) => (
+      <div className={`${commonClasses.card} h-96 overflow-hidden`}>
+        <h4 className="text-lg font-semibold mb-4">{title}</h4>
+        <ResponsiveContainer width="100%" height="100%">
+          <LineChart data={data}>
+            <CartesianGrid strokeDasharray="3 3" />
+            <XAxis dataKey="time" />
+            <YAxis />
+            <Tooltip />
+            <Legend />
+            <Line type="monotone" dataKey={dataKey} stroke={color} dot={false} />
+          </LineChart>
+        </ResponsiveContainer>
+      </div>
+    );
+    
+    return (
+      <>
+        <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-5 gap-6 mb-8">
+          <div className={`${commonClasses.card} text-center`}>
+            <p className="text-sm font-medium">Instant Power</p>
+            <p className="text-3xl font-bold mt-2">{latestData.power || 'N/A'} W</p>
+          </div>
+          <div className={`${commonClasses.card} text-center`}>
+            <p className="text-sm font-medium">Voltage</p>
+            <p className="text-3xl font-bold mt-2">{latestData.voltage || 'N/A'} V</p>
+          </div>
+          <div className={`${commonClasses.card} text-center`}>
+            <p className="text-sm font-medium">Current</p>
+            <p className="text-3xl font-bold mt-2">{latestData.current || 'N/A'} A</p>
+          </div>
+          <div className={`${commonClasses.card} text-center`}>
+            <p className="text-sm font-medium">Temperature</p>
+            <p className="text-3xl font-bold mt-2">{latestData.temperature || 'N/A'}°C</p>
+          </div>
+          <div className={`${commonClasses.card} text-center`}>
+            <p className="text-sm font-medium">Irradiance</p>
+            <p className="text-3xl font-bold mt-2">{latestData.irradiance || 'N/A'} W/m²</p>
+          </div>
+        </div>
+        <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
+          <ChartCard title="Voltage (V)" dataKey="voltage" color="#4F46E5" />
+          <ChartCard title="Current (A)" dataKey="current" color="#10B981" />
+          <ChartCard title="Temperature (°C)" dataKey="temperature" color="#EF4444" />
+          <ChartCard title="Irradiance (W/m²)" dataKey="irradiance" color="#F59E0B" />
+        </div>
+      </>
+    );
+  };
+  
+  const HomePage = () => (
+    <div className={`min-h-screen flex flex-col items-center justify-center p-8 text-center ${commonClasses.bg}`}>
+      <div className="max-w-4xl mx-auto">
+        <h1 className="text-4xl md:text-6xl font-extrabold text-transparent bg-clip-text bg-gradient-to-r from-green-400 to-blue-500 mb-4">
+          Smart Solar Health Monitoring System
+        </h1>
+        <p className="text-lg md:text-xl max-w-2xl mx-auto mb-8 font-light">
+          An AI + IoT powered solution for real-time solar panel monitoring, predictive maintenance, and cost savings.
+        </p>
+        <button
+          onClick={() => setPage('dashboard')}
+          className={`${commonClasses.button} ${commonClasses.ctaButton}`}
+        >
+          View Dashboard
+        </button>
+      </div>
+    </div>
+  );
+
+  const DashboardLayout = () => (
+    <div className={`min-h-screen p-6 md:p-12 font-sans ${commonClasses.bg}`}>
+      <DashboardHeader />
+      {view === 'overall' && <OverallDashboard />}
+      {view === 'panels' && <PanelsView />}
+      {view === 'panel-detail' && <PanelDetailView />}
+      <footer className={`mt-12 text-center py-4 text-gray-500 dark:text-gray-400 border-t ${isDark ? 'border-gray-700' : 'border-gray-200'}`}>
+        <p>Powered by AI + IoT</p>
+      </footer>
+    </div>
+  );
+
+  return (
+    <>
+      {page === 'home' ? <HomePage /> : <DashboardLayout />}
+    </>
+  );
+};
+
+export default App;
